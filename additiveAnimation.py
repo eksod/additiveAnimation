@@ -17,12 +17,11 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 
 Author:
-Eduardo Simioni <eduardo.simioni@gmail.com>
-http://www.eduardosimioni.com
+eduardo.simioni@gmail.com
+http://www.eksod.com
 """
 
 from pyfbsdk import *
-import pprint
 import math
 
 app = FBApplication()
@@ -31,12 +30,10 @@ scene = FBSystem().Scene
 player = FBPlayerControl()
 animMatrix = [] # used to store each model FCurve (on Take 001)
 subMatrix = [] # used to store each model FCurve to be substracted (on Take 002)
-pp = pprint.PrettyPrinter()
 
 
 # from KxL at Autodesk Area:
 # http://area.autodesk.com/forum/63719
-
 def FBMatrixFromAnimationNode( pModel, pTime ):
     lResult = FBMatrix()
     lTranslationNode = pModel.Translation.GetAnimationNode()
@@ -102,10 +99,8 @@ def FBMatrixMult( pParent, pChild ):
 # end of KxL code
 
 
-
 # neill's code from:
 # http://neill3d.com/mobi-skript-raschet-additivnoj-animacii?langswitch_lang=en
-
 def MatrixInverse(M):
     out = FBMatrix()
     out.Identity()
@@ -140,6 +135,7 @@ def MatrixMult(Ma, Mb):
             res[i*4+j] = sum
     return res
 
+
 def MatrixToEulerAngles( M ):
     heading = 0.0
     attitude = 0.0
@@ -168,15 +164,11 @@ def MatrixToEulerAngles( M ):
 # end of Neill's code
 
 
-
-
-
 def getCurve(lModel, fFirst, fLast):
     """
     Receives root model (hips) and proceeds to store all skeleton
-    keys information as a single array of FBMatrix() in vectorToRet
+    keys information as a single array of FBMatrix() in vectorToRet.
     """
-    
     lAnimNode = lModel.Rotation.GetAnimationNode()
     vectorToRet = []
 
@@ -192,20 +184,18 @@ def getCurve(lModel, fFirst, fLast):
     return vectorToRet
 
 
-
-
 def setCurve(lModel, fFirst, fLast, vResult, offset):
     """
-    Receives root model and array of FBVector3d() to apply
-    to each model of the skeleton's Rotation.AnimationNode
+    Receives root model, time and array of FBVector3d() to apply
+    to each model of the skeleton's Rotation.AnimationNode.
+    offset should be zero when called from outside.
     """
-    
     lAnimNode = lModel.Rotation.GetAnimationNode()
     timeline = fLast - fFirst + 1
     
     for lCounter in range(timeline):
         for axis in range(3):
-            # print "lcounter: " + str(lCounter) + "    axis: " + str(axis) + "           offset: " + str(offset) + "      vResult len: " + str(len(vResult)) + "      node name: " + lModel.Name
+            # print "lCounter: " + str(lCounter) + "    axis: " + str(axis) + "           offset: " + str(offset) + "      vResult len: " + str(len(vResult)) + "      node name: " + lModel.Name
             lAnimNode.Nodes[axis].KeyAdd(FBTime(0,0,0,lCounter), vResult[lCounter+offset][axis])
 
     offset += timeline
@@ -213,10 +203,28 @@ def setCurve(lModel, fFirst, fLast, vResult, offset):
         offset = setCurve(child, fFirst, fLast, vResult, offset)
     # print timeline
     return offset
+
+
+def plotAnim(char, whereToPlot):
+    """
+    Just plots.
+    """
+    plotOpt = FBPlotOptions()
+    plotOpt.ConstantKeyReducerKeepOneKey = True
+    plotOpt.PlotAllTakes = True
+    plotOpt.PlotOnFrame = True
+    plotOpt.PlotPeriod = FBTime( 0, 0, 0, 1 )
+    plotOpt.PreciseTimeDiscontinuities = True
+    plotOpt.UseConstantKeyReducer = False
+    plotOpt.ConstantKeyReducerKeepOneKey  = True
+
+    char.PlotAnimation(whereToPlot, plotOpt)
+
     
 
 def main():
-   
+
+    # let's check the scene first
     if (len(scene.Takes)!= 3):
         FBMessageBox( "Incorrect amount of takes", "Please create 3 takes in this order: additive anim, substraction anim, result take", "OK", None, None )
         return False
@@ -225,10 +233,27 @@ def main():
         takeSubstraction = scene.Takes[1]
         takeResult = scene.Takes[2]
 
+    character = app.CurrentCharacter #FBCharacter()
+    if not character: # if character fails there's no character on the scene
+        FBMessageBox( "No character in the scene", "Please create a character", "OK", None, None )
+        return False
+        # TO DO:
+        # add support for non-charaized hierarchies
+        # rootModel = FBFindModelByName("b_Hips")
+    else: 
+        rootModel = character.GetModel(FBBodyNodeId.kFBHipsNodeId)
+        print "rootModel is:", rootModel.Name
+        # just plots, for safety
+        plotAnim(character, FBCharacterPlotWhere.kFBCharacterPlotOnSkeleton) 
+        
+        # we get the stance/bind pose to paste later and turn off any input
+        character.GoToStancePose()
+        bindPose = FBCharacterPose("StancePose")
+        bindPose.CopyPose(character)
+        character.ActiveInput = False
+
     lStartFrame = FBPlayerControl().LoopStart.GetFrame(True)
     lStopFrame = FBPlayerControl().LoopStop.GetFrame(True)
-
-    rootModel = FBFindModelByName("b_Hips")
     
     system.CurrentTake = takeAnimation
     scene.Evaluate()
@@ -240,33 +265,39 @@ def main():
 
     system.CurrentTake = takeResult
     scene.Evaluate()
-   
-   
-    # iterates through each matrix and stores the result as FBVector3d for the rotation animatino node.
-    # subtracted rotation = (original rotation matrix) * (inverse of subtrahend)
-    # M3 = M1 * M2^-1
-    # we also extract euler angles from the rotation matrix
-    resultVectors = []
-    for i in range(len(animMatrix)):
-        resultVectors.append( MatrixToEulerAngles (FBMatrixMult(animMatrix[i], (MatrixInverse(subMatrix[i])))))
     
-    # print "resultvectors"
-    # pp.pprint(resultVectors)
-
-    setCurve(rootModel, lStartFrame, lStopFrame, resultVectors, 0)
-
-
-#   To be added on version 1.0
-
-#    character = app.CurrentCharacter #FBCharacter()
-#    if character:
-#       #DO SCRIPT
-#       rootModel = character.GetModel(FBBodyNodeId.kFBHipsNodeId)
-#       print "rootModel is:", rootModel.Name
-#        
-#    else: # if character fails there's no character on the scene/selected
-#        FBMessageBox( "No character selected", "Please select a character", "OK", None, None )
+    if len(animMatrix) != len(subMatrix):
+        FBMessageBox( "Something is wrong", "Amount of keyframes or bones from Take01 and Take02 do not match.", "OK", None, None )
+        return False
+    else:
+        # iterates through each matrix and stores the result as FBVector3d for the rotation animation node.
+        # subtracted rotation = (original rotation matrix) * (inverse of subtrahend)
+        # M3 = M1 * M2^-1
+        # we also extract euler angles from the rotation matrix
+        resultVectors = []
+        for i in range(len(animMatrix)):
+            resultVectors.append( MatrixToEulerAngles (FBMatrixMult(animMatrix[i], (MatrixInverse(subMatrix[i])))))
         
+        # paste new data
+        setCurve(rootModel, lStartFrame, lStopFrame, resultVectors, 0)
+
+        # plot to control rig and activate
+        plotAnim(character, FBCharacterPlotWhere.kFBCharacterPlotOnControlRig) 
+        character.InputType = FBCharacterInputType.kFBCharacterInputMarkerSet
+        character.ActiveInput = True
+        
+        # create new layer
+        system.CurrentTake.CreateNewLayer()
+        lCount = system.CurrentTake.GetLayerCount()
+        system.CurrentTake.GetLayer(lCount-1).Name= "StancePose"
+        system.CurrentTake.SetCurrentLayer(lCount-1)
+        
+        # paste pose
+        poseOptions = FBCharacterPoseOptions()
+        poseOptions.mCharacterPoseKeyingMode = FBCharacterPoseKeyingMode.kFBCharacterPoseKeyingModeFullBody
+        bindPose.PastePose(character, poseOptions)
+        character.SelectModels(True, True, True, True)
+        FBPlayerControl().Key()
         
 
 
