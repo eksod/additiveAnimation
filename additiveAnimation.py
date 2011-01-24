@@ -28,8 +28,6 @@ app = FBApplication()
 system = FBSystem()
 scene = FBSystem().Scene
 player = FBPlayerControl()
-animMatrix = [] # used to store each model FCurve (on Take 001)
-subMatrix = [] # used to store each model FCurve to be substracted (on Take 002)
 
 
 # from KxL at Autodesk Area:
@@ -164,7 +162,7 @@ def MatrixToEulerAngles( M ):
 # end of Neill's code
 
 
-def getCurve(lModel, fFirst, fLast):
+def getCurve(lModel, fFirst, fLast, lFbp):
     """
     Receives root model (hips) and proceeds to store all skeleton
     keys information as a single array of FBMatrix() in vectorToRet.
@@ -173,18 +171,20 @@ def getCurve(lModel, fFirst, fLast):
     vectorToRet = []
 
     for lCounter in range(fFirst, fLast+1): # range is not inclusive http://docs.python.org/library/functions.html#range    
+        lFbp.Text = lModel.Name
+        lFbp.Percent = lCounter / int(fLast - fFirst) * 100
         vectorToRet.append( FBMatrixFromAnimationNode(lModel, FBTime(0,0,0,lCounter)) )
 
     # print lModel.Name
     # pp.pprint( vectorToRet)
        
     for child in lModel.Children:
-        vectorToRet.extend(getCurve(child, fFirst, fLast))
+        vectorToRet.extend(getCurve(child, fFirst, fLast, lFbp))
     
     return vectorToRet
 
 
-def setCurve(lModel, fFirst, fLast, vResult, offset):
+def setCurve(lModel, fFirst, fLast, vResult, offset, lFbp):
     """
     Receives root model, time and array of FBVector3d() to apply
     to each model of the skeleton's Rotation.AnimationNode.
@@ -194,13 +194,15 @@ def setCurve(lModel, fFirst, fLast, vResult, offset):
     timeline = fLast - fFirst + 1
     
     for lCounter in range(timeline):
+        lFbp.Text = lModel.Name
+        lFbp.Percent = lCounter / int(fLast - fFirst) * 100
         for axis in range(3):
             # print "lCounter: " + str(lCounter) + "    axis: " + str(axis) + "           offset: " + str(offset) + "      vResult len: " + str(len(vResult)) + "      node name: " + lModel.Name
             lAnimNode.Nodes[axis].KeyAdd(FBTime(0,0,0,lCounter), vResult[lCounter+offset][axis])
 
     offset += timeline
     for child in lModel.Children:
-        offset = setCurve(child, fFirst, fLast, vResult, offset)
+        offset = setCurve(child, fFirst, fLast, vResult, offset, lFbp)
     # print timeline
     return offset
 
@@ -216,17 +218,18 @@ def plotAnim(char, whereToPlot):
     plotOpt.PlotPeriod = FBTime( 0, 0, 0, 1 )
     plotOpt.PreciseTimeDiscontinuities = True
     plotOpt.UseConstantKeyReducer = False
-    plotOpt.ConstantKeyReducerKeepOneKey  = True
 
     char.PlotAnimation(whereToPlot, plotOpt)
 
     
 
 def main():
+    animMatrix = [] # used to store each model FCurve (on Take 001)
+    subMatrix = [] # used to store each model FCurve to be substracted (on Take 002)
 
     # let's check the scene first
     if (len(scene.Takes)!= 3):
-        FBMessageBox( "Incorrect amount of takes", "Please create 3 takes in this order: additive anim, substraction anim, result take", "OK", None, None )
+        FBMessageBox( "Incorrect amount of takes", "Please create 3 takes in this order: additive anim, substraction anim, empty take for result", "OK", None, None )
         return False
     else:
         takeAnimation = scene.Takes[0]
@@ -251,17 +254,23 @@ def main():
         bindPose = FBCharacterPose("StancePose")
         bindPose.CopyPose(character)
         character.ActiveInput = False
-
-    lStartFrame = FBPlayerControl().LoopStart.GetFrame(True)
-    lStopFrame = FBPlayerControl().LoopStop.GetFrame(True)
     
     system.CurrentTake = takeAnimation
     scene.Evaluate()
-    animMatrix = getCurve(rootModel, lStartFrame, lStopFrame)
-
+    lStartFrame = FBPlayerControl().LoopStart.GetFrame(True)
+    lStopFrame = FBPlayerControl().LoopStop.GetFrame(True)
+    lFbp = FBProgress()
+    lFbp.ProgressBegin()
+    lFbp.Caption = "Getting rotation data from Take01"
+    animMatrix = getCurve(rootModel, lStartFrame, lStopFrame, lFbp)
+    lFbp.ProgressDone()
+    
     system.CurrentTake = takeSubstraction
     scene.Evaluate()
-    subMatrix = getCurve(rootModel, lStartFrame, lStopFrame)
+    lFbp.ProgressBegin()
+    lFbp.Caption = "Getting rotation data from Take02"
+    subMatrix = getCurve(rootModel, lStartFrame, lStopFrame, lFbp)
+    lFbp.ProgressDone()
 
     system.CurrentTake = takeResult
     scene.Evaluate()
@@ -275,12 +284,20 @@ def main():
         # M3 = M1 * M2^-1
         # we also extract euler angles from the rotation matrix
         resultVectors = []
+        lFbp.ProgressBegin()
         for i in range(len(animMatrix)):
+            lFbp.Caption = "Calculating new rotation matrices"
+            lFbp.Text = ""
+            lFbp.Percent = int(i) / int(len(animMatrix)) * 100
             resultVectors.append( MatrixToEulerAngles (FBMatrixMult(animMatrix[i], (MatrixInverse(subMatrix[i])))))
+        lFbp.ProgressDone()
         
         # paste new data
-        setCurve(rootModel, lStartFrame, lStopFrame, resultVectors, 0)
-
+        lFbp.ProgressBegin()
+        lFbp.Caption = "Setting new rotation data on Take03"
+        setCurve(rootModel, lStartFrame, lStopFrame, resultVectors, 0, lFbp)
+        lFbp.ProgressDone()
+        
         # plot to control rig and activate
         plotAnim(character, FBCharacterPlotWhere.kFBCharacterPlotOnControlRig) 
         character.InputType = FBCharacterInputType.kFBCharacterInputMarkerSet
@@ -291,14 +308,16 @@ def main():
         lCount = system.CurrentTake.GetLayerCount()
         system.CurrentTake.GetLayer(lCount-1).Name= "StancePose"
         system.CurrentTake.SetCurrentLayer(lCount-1)
-        
+
         # paste pose
         poseOptions = FBCharacterPoseOptions()
         poseOptions.mCharacterPoseKeyingMode = FBCharacterPoseKeyingMode.kFBCharacterPoseKeyingModeFullBody
         bindPose.PastePose(character, poseOptions)
         character.SelectModels(True, True, True, True)
+        FBPlayerControl().GotoStart()
         FBPlayerControl().Key()
+        scene.Evaluate()
         
 
-
 main()
+del(app, system, scene, player)
