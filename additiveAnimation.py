@@ -120,7 +120,6 @@ def MatrixInverse(M):
 
     return out
 
-# this one is not working, whereas FBMatrixMult works. need to investigate why.
 def MatrixMult(Ma, Mb):
     res = FBMatrix()
 
@@ -285,8 +284,8 @@ def main():
         # we also extract euler angles from the rotation matrix
         resultVectors = []
         lFbp.ProgressBegin()
+        lFbp.Caption = "Calculating new rotation matrices"
         for i in range(len(animMatrix)):
-            lFbp.Caption = "Calculating new rotation matrices"
             lFbp.Text = ""
             lFbp.Percent = int(i) / int(len(animMatrix)) * 100
             resultVectors.append( MatrixToEulerAngles (FBMatrixMult(animMatrix[i], (MatrixInverse(subMatrix[i])))))
